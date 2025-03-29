@@ -14,8 +14,10 @@ VisionRunningMode = mp.tasks.vision.RunningMode
 ImageFormat = mp.ImageFormat  # For creating an MP image.
 mp_hands = mp.solutions.hands
 hands = mp_hands.Hands()
+mp_face_detection = mp.solutions.face_detection
+mp_drawing = mp.solutions.drawing_utils
 
-
+replacement_image = cv2.imread("lebron.png", cv2.IMREAD_UNCHANGED)
 left_gesture = "None"
 right_gesture = "None"
 audio_params = {"gain": 0, "reverb": 0, "pitchshift": 0}
@@ -171,54 +173,101 @@ options = GestureRecognizerOptions(
     num_hands=2,
 )
 with GestureRecognizer.create_from_options(options) as recognizer:
-    # Open webcam.
-    cap = cv2.VideoCapture(0)
 
-    while True:
-        ret, frame = cap.read()
-        if not ret:
-            break
+    with mp_face_detection.FaceDetection(
+        min_detection_confidence=0.5
+    ) as face_detection:
+        cap = cv2.VideoCapture(0)
 
-        # Flip for natural interaction and convert color.
-        frame = cv2.flip(frame, 1)
-        rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        mp_image = mp.Image(image_format=ImageFormat.SRGB, data=rgb)
-        # Use current time in ms as timestamp.
-        timestamp_ms = int(cv2.getTickCount() / cv2.getTickFrequency() * 1000)
+        while True:
+            ret, frame = cap.read()
+            if not ret:
+                break
 
-        # Process the frame asynchronously.
-        recognizer.recognize_async(mp_image, timestamp_ms)
+            # Flip for natural interaction and convert color.
+            frame = cv2.flip(frame, 1)
+            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
 
-        # Hand landmark detection
-        results = hands.process(rgb)
-        draw_lines(results)
+            face_results = face_detection.process(rgb)
+            if face_results.detections:
+                for detection in face_results.detections:
+                    bboxC = detection.location_data.relative_bounding_box
+                    ih, iw, _ = frame.shape
+                    x = int(bboxC.xmin * iw)
+                    y = int(bboxC.ymin * ih)
+                    w = int(bboxC.width * iw)
+                    h = int(bboxC.height * ih)
 
-        # # Display the webcam frame.
-        cv2.putText(
-            frame,
-            f"Left Hand: {left_gesture}",
-            (10, 50),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            1,
-            (255, 0, 0),
-            2,
-        )
-        cv2.putText(
-            frame,
-            f"Right Hand: {right_gesture}",
-            (10, 150),
-            cv2.FONT_HERSHEY_SIMPLEX,
-            1,
-            (255, 0, 0),
-            2,
-        )
-        cv2.imshow("Gesture Recognition", frame)
+                    # Increase size of the replacement image by a scale factor.
+                    scale = 4  # adjust factor as needed
+                    new_w = int(w * scale)
+                    new_h = int(h * scale)
+                    # Center the enlarged region on the detected face.
+                    center_x = x + w // 2
+                    center_y = y + h // 2
+                    new_x = max(0, center_x - new_w // 2)
+                    new_y = max(0, center_y - new_h // 2)
+                    # Ensure the new dimensions fit within the frame boundaries.
+                    if new_x + new_w > iw:
+                        new_w = iw - new_x
+                    if new_y + new_h > ih:
+                        new_h = ih - new_y
 
-        if cv2.waitKey(1) & 0xFF == 27:
-            break
+                    # Resize the replacement image to the new dimensions.
+                    replacement_resized = cv2.resize(replacement_image, (new_w, new_h))
 
-    cap.release()
-    cv2.destroyAllWindows()
+                    # If the replacement image has an alpha channel, blend using it.
+                    if replacement_resized.shape[2] == 4:
+                        alpha_s = replacement_resized[:, :, 3] / 255.0
+                        alpha_l = 1.0 - alpha_s
+                        for c in range(0, 3):
+                            frame[new_y : new_y + new_h, new_x : new_x + new_w, c] = (
+                                alpha_s * replacement_resized[:, :, c]
+                                + alpha_l
+                                * frame[new_y : new_y + new_h, new_x : new_x + new_w, c]
+                            )
+                    else:
+                        frame[new_y : new_y + new_h, new_x : new_x + new_w] = (
+                            replacement_resized
+                        )
+
+            mp_image = mp.Image(image_format=ImageFormat.SRGB, data=rgb)
+            # Use current time in ms as timestamp.
+            timestamp_ms = int(cv2.getTickCount() / cv2.getTickFrequency() * 1000)
+
+            # Process the frame asynchronously.
+            recognizer.recognize_async(mp_image, timestamp_ms)
+
+            # Hand landmark detection
+            results = hands.process(rgb)
+            draw_lines(results)
+
+            # # Display the webcam frame.
+            cv2.putText(
+                frame,
+                f"Left Hand: {left_gesture}",
+                (10, 50),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                1,
+                (255, 0, 0),
+                2,
+            )
+            cv2.putText(
+                frame,
+                f"Right Hand: {right_gesture}",
+                (10, 150),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                1,
+                (255, 0, 0),
+                2,
+            )
+            cv2.imshow("Gesture Recognition", frame)
+
+            if cv2.waitKey(1) & 0xFF == 27:
+                break
+
+        cap.release()
+        cv2.destroyAllWindows()
 
 
 def update_audio_params(audio_params, left_dist, right_dist, left_to_right_dst):
