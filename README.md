@@ -2,7 +2,7 @@
 
 Use your hands to become a DJ!
 
-[![Demo](https://raw.githubusercontent.com/jianrong7/hand-sign/main/demo.mp4)]
+[![Watch the video](./lebron.png)](https://youtu.be/SKBjkKGEULo?si=Twid0WoNUJ3MsPzx)
 
 Just a fun small side project I hacked together in 5 hours.
 
